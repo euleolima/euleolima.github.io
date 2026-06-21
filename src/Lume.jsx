@@ -147,7 +147,7 @@ export default function Lume() {
 
       <Header tab={tab} cursor={cursor} setCursor={setCursor} theme={theme} toggleTheme={toggleTheme} profile={profile} onPerfil={()=>setTab("perfil")} />
 
-      <main style={{ flex:1,overflowY:"auto",padding:"8px 16px 110px" }}>
+      <main style={{ flex:1,overflowY:"auto",padding:"8px 16px 0",paddingBottom:"max(calc(env(safe-area-inset-bottom) + 80px), 110px)" }}>
         {tab==="hoje"    && <Hoje    state={state} cursor={cursor} patch={patch} onEdit={setEditTarget}/>}
         {tab==="tempo"   && <Tempo   state={state}/>}
         {tab==="agenda"  && <Agenda  state={state} patch={patch} onEdit={setEditTarget}/>}
