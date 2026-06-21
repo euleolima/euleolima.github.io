@@ -1,0 +1,43 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
+
+export default defineConfig({
+  base: '/lume/',
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['icons/*.png', 'favicon.svg'],
+      manifest: {
+        name: 'Lume',
+        short_name: 'Lume',
+        description: 'Mantenha aceso. Um lugar só pra tudo que importa.',
+        theme_color: '#0F0C0A',
+        background_color: '#0F0C0A',
+        display: 'standalone',
+        orientation: 'portrait',
+        start_url: '/lume/',
+        scope: '/lume/',
+        lang: 'pt-BR',
+        icons: [
+          {
+            src: '/lume/icons/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any maskable'
+          },
+          {
+            src: '/lume/icons/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any maskable'
+          }
+        ]
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}']
+      }
+    })
+  ]
+})
