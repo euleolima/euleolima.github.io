@@ -4,7 +4,7 @@ import {
   ChevronLeft, ChevronRight, Flame, Trash2, Moon, Layers,
   X, FolderOpen, LayoutGrid, Edit2, Settings, Smartphone,
   Bell, Download, Shield, ArrowRight, Sparkles, Upload, User, Camera,
-  AlertCircle, ChevronDown, MessageSquare, AlertTriangle
+  AlertCircle, ChevronDown, MessageSquare, AlertTriangle, MoreHorizontal
 } from "lucide-react";
 
 // ─── Temas ─────────────────────────────────────────────────────
@@ -110,17 +110,40 @@ export default function Lume() {
     setOnboarded(true);
   };
 
+  const [activeProject, setActiveProject] = useState(null); // {areaId, projectId}
+
   if (!state) return <Splash />;
   if (!onboarded) return <Onboarding theme={theme} toggleTheme={toggleTheme} onDone={finishOnboard} />;
 
-  const tabs = [
+  // Se tem projeto ativo, mostra tela de projeto
+  if (activeProject) {
+    return (
+      <div style={{ minHeight:"100vh",background:COL.bg,color:COL.ink,
+        fontFamily:"'Inter',system-ui,sans-serif",display:"flex",flexDirection:"column",
+        maxWidth:480,margin:"0 auto" }}>
+        <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}@keyframes slide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.row{animation:slide .2s ease both;}input::placeholder{color:${COL.faint}}select{appearance:none;-webkit-appearance:none;}input[type=range]{accent-color:${COL.accent};}::-webkit-scrollbar{display:none;}`}</style>
+        <ProjetoView
+          state={state} patch={patch}
+          areaId={activeProject.areaId}
+          projectId={activeProject.projectId}
+          onBack={()=>setActiveProject(null)}
+          cursor={todayKey()}
+        />
+      </div>
+    );
+  }
+
+  // Abas principais (5) + menu "..."
+  const mainTabs = [
     { id:"hoje",    label:"Hoje",    icon:Sun        },
     { id:"tempo",   label:"Tempo",   icon:LayoutGrid },
-    { id:"agenda",  label:"Agenda",  icon:Calendar   },
     { id:"habitos", label:"Hábitos", icon:Repeat     },
     { id:"areas",   label:"Áreas",   icon:Layers     },
-    { id:"metas",   label:"Metas",   icon:Target     },
     { id:"review",  label:"Review",  icon:TrendingUp },
+  ];
+  const moreTabs = [
+    { id:"agenda",  label:"Agenda",  icon:Calendar   },
+    { id:"metas",   label:"Metas",   icon:Target     },
     { id:"perfil",  label:"Perfil",  icon:User       },
   ];
 
@@ -149,16 +172,16 @@ export default function Lume() {
 
       <main style={{ flex:1,overflowY:"auto",padding:"8px 16px 0",paddingBottom:"max(calc(env(safe-area-inset-bottom) + 80px), 110px)" }}>
         {tab==="hoje"    && <Hoje    state={state} cursor={cursor} patch={patch} onEdit={setEditTarget}/>}
-        {tab==="tempo"   && <Tempo   state={state}/>}
+        {tab==="tempo"   && <Tempo   state={state} patch={patch}/>}
         {tab==="agenda"  && <Agenda  state={state} patch={patch} onEdit={setEditTarget}/>}
         {tab==="habitos" && <Habitos state={state} patch={patch} onEdit={setEditTarget}/>}
-        {tab==="areas"   && <Areas   state={state} patch={patch}/>}
+        {tab==="areas"   && <Areas   state={state} patch={patch} onProject={setActiveProject}/>}
         {tab==="metas"   && <Metas   state={state} patch={patch} onEdit={setEditTarget}/>}
         {tab==="review"  && <Review  state={state} checkins={checkins} onCheckin={()=>setShowCheckin(true)}/>}
         {tab==="perfil"  && <Perfil  profile={profile} setProfile={setProfile} state={state} theme={theme} toggleTheme={toggleTheme} patch={patch}/>}
       </main>
 
-      <Nav tabs={tabs} tab={tab} setTab={setTab}/>
+      <Nav mainTabs={mainTabs} moreTabs={moreTabs} tab={tab} setTab={setTab}/>
 
       {editTarget && (
         <EditModal
@@ -730,9 +753,11 @@ function Hoje({ state, cursor, patch, onEdit }) {
 }
 
 // ─── TEMPO ─────────────────────────────────────────────────────
-function Tempo({ state }) {
-  const [view,setView]=useState("mes");
-  const [nav, setNav] =useState(0);
+function Tempo({ state, patch }) {
+  const [view,    setView]    = useState("mes");
+  const [nav,     setNav]     = useState(0);
+  const [daySheet,setDaySheet]= useState(null); // dateKey selecionado
+
   return (
     <>
       <div style={{display:"flex",gap:6,marginBottom:14,marginTop:4}}>
@@ -746,14 +771,23 @@ function Tempo({ state }) {
           </button>
         ))}
       </div>
-      {view==="semana"&&<ViewSemana state={state} nav={nav} setNav={setNav}/>}
-      {view==="mes"   &&<ViewMes    state={state} nav={nav} setNav={setNav}/>}
-      {view==="ano"   &&<ViewAno    state={state} nav={nav} setNav={setNav}/>}
+      {view==="semana"&&<ViewSemana state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
+      {view==="mes"   &&<ViewMes    state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
+      {view==="ano"   &&<ViewAno    state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
+
+      {daySheet&&(
+        <DaySheet
+          dateKey={daySheet}
+          state={state}
+          patch={patch}
+          onClose={()=>setDaySheet(null)}
+        />
+      )}
     </>
   );
 }
 
-function ViewSemana({ state, nav, setNav }) {
+function ViewSemana({ state, nav, setNav, onDay }) {
   const days=useMemo(()=>{
     const today=new Date(),dow=today.getDay();
     const mon=new Date(today); mon.setDate(today.getDate()-dow+1+nav*7);
@@ -774,8 +808,8 @@ function ViewSemana({ state, nav, setNav }) {
           const pct=total?Math.round((done/total)*100):null;
           const isT=k===todayKey();
           return (
-            <div key={k} style={{background:COL.surface,border:`1px solid ${isT?COL.accent:COL.line}`,
-              borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10}}>
+            <div key={k} onClick={()=>onDay(k)} style={{background:COL.surface,border:`1px solid ${isT?COL.accent:COL.line}`,
+              borderRadius:12,padding:"11px 14px",display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
               <div style={{width:34,textAlign:"center"}}>
                 <div style={{fontSize:10,color:isT?COL.accent:COL.faint,fontWeight:700,textTransform:"uppercase"}}>{WD[dow2]}</div>
                 <div style={{fontSize:20,fontWeight:800,color:isT?COL.accent:COL.ink,lineHeight:1.1}}>{dt.getDate()}</div>
@@ -795,7 +829,7 @@ function ViewSemana({ state, nav, setNav }) {
   );
 }
 
-function ViewMes({ state, nav, setNav }) {
+function ViewMes({ state, nav, setNav, onDay }) {
   const {year,month}=useMemo(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+nav); return {year:d.getFullYear(),month:d.getMonth()}; },[nav]);
   const days=useMemo(()=>{ const first=new Date(year,month,1),last=new Date(year,month+1,0),cells=[]; for(let i=0;i<first.getDay();i++) cells.push(null); for(let d=1;d<=last.getDate();d++) cells.push(todayKey(new Date(year,month,d))); while(cells.length%7!==0) cells.push(null); return cells; },[year,month]);
   const dotMap=useMemo(()=>{ const m={}; state.tasks.forEach(t=>{if(!m[t.date])m[t.date]=[]; if(t.areaId)m[t.date].push(areaOf(state,t.areaId)?.color||COL.accent);}); state.events.forEach(e=>{if(!m[e.date])m[e.date]=[]; if(e.areaId)m[e.date].push(areaOf(state,e.areaId)?.color||COL.warn);}); return m; },[state]);
@@ -810,9 +844,9 @@ function ViewMes({ state, nav, setNav }) {
           const dt=keyToDate(k),isT=k===todayKey(),pct=compMap[k],dots=(dotMap[k]||[]).slice(0,3);
           const bg=pct===null?COL.surface:pct>=70?"#1E3B1E":pct>=40?"#3B2C10":"#2A1A1A";
           return (
-            <div key={k} style={{background:isT?COL.accentDim:bg,border:`1px solid ${isT?COL.accent:COL.line}`,
+            <div key={k} onClick={()=>onDay(k)} style={{background:isT?COL.accentDim:bg,border:`1px solid ${isT?COL.accent:COL.line}`,
               borderRadius:8,padding:"6px 4px",textAlign:"center",minHeight:52,display:"flex",
-              flexDirection:"column",alignItems:"center",justifyContent:"space-between"}}>
+              flexDirection:"column",alignItems:"center",justifyContent:"space-between",cursor:"pointer"}}>
               <div style={{fontSize:12.5,fontWeight:isT?800:500,color:isT?COL.accent:COL.ink}}>{dt.getDate()}</div>
               <div style={{display:"flex",gap:2,justifyContent:"center"}}>{dots.map((c,j)=><div key={j} style={{width:5,height:5,borderRadius:"50%",background:c}}/>)}</div>
               {pct!==null&&<div style={{fontSize:9,color:COL.faint}}>{pct}%</div>}
@@ -827,7 +861,7 @@ function ViewMes({ state, nav, setNav }) {
   );
 }
 
-function ViewAno({ state, nav, setNav }) {
+function ViewAno({ state, nav, setNav, onDay }) {
   const year=useMemo(()=>new Date().getFullYear()+nav,[nav]);
   const MONTHS=useMemo(()=>Array.from({length:12},(_,m)=>{ const first=new Date(year,m,1),last=new Date(year,m+1,0),cells=[]; for(let i=0;i<first.getDay();i++) cells.push(null); for(let d=1;d<=last.getDate();d++) cells.push(todayKey(new Date(year,m,d))); return {m,name:new Date(year,m,1).toLocaleDateString("pt-BR",{month:"short"}),cells}; }),[year]);
   const compMap=useMemo(()=>{ const m={}; for(let mo=0;mo<12;mo++){ const last=new Date(year,mo+1,0).getDate(); for(let d=1;d<=last;d++){ const k=todayKey(new Date(year,mo,d)); const tasks=state.tasks.filter(t=>t.date===k); const habits=state.habits.filter(h=>isHabitActive(h,k)); const total=tasks.length+habits.length; const done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length; m[k]=total?Math.round((done/total)*100):null; }} return m; },[year,state]);
@@ -845,6 +879,169 @@ function ViewAno({ state, nav, setNav }) {
         ))}
       </div>
     </>
+  );
+}
+
+// ─── DAY SHEET ─────────────────────────────────────────────────
+function DaySheet({ dateKey, state, patch, onClose }) {
+  const [tab,     setTab]     = useState("ver");  // ver | tarefa | evento
+  const [draft,   setDraft]   = useState("");
+  const [dPrio,   setDPrio]   = useState("normal");
+  const [dArea,   setDArea]   = useState("");
+  const [dProj,   setDProj]   = useState("");
+  const [dTime,   setDTime]   = useState("");
+
+  const dow     = keyToDate(dateKey).getDay();
+  const tasks   = state.tasks.filter(t=>t.date===dateKey);
+  const events  = state.events.filter(e=>e.date===dateKey).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+  const habits  = state.habits.filter(h=>isHabitActive(h,dateKey));
+  const isToday = dateKey===todayKey();
+
+  const addTask = () => {
+    const t=draft.trim(); if(!t) return;
+    patch(s=>s.tasks.push({id:uid(),title:t,date:dateKey,done:false,areaId:dArea||null,projectId:dProj||null,priority:dPrio}));
+    setDraft(""); setTab("ver");
+  };
+  const addEvent = () => {
+    const t=draft.trim(); if(!t) return;
+    patch(s=>s.events.push({id:uid(),title:t,date:dateKey,time:dTime,areaId:dArea||null,projectId:dProj||null}));
+    setDraft(""); setTab("ver");
+  };
+  const toggleTask  = id => patch(s=>{const x=s.tasks.find(t=>t.id===id);x.done=!x.done;});
+  const toggleHabit = id => patch(s=>{const h=s.habits.find(x=>x.id===id);h.log[dateKey]=!h.log[dateKey];});
+
+  const IS=inputStyle, AB=addBtn;
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",flexDirection:"column",justifyContent:"flex-end"}}
+      onClick={onClose}>
+      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,.55)",backdropFilter:"blur(4px)",animation:"fadeIn .2s ease"}}/>
+      <div onClick={e=>e.stopPropagation()}
+        style={{position:"relative",background:COL.surface,borderRadius:"20px 20px 0 0",
+          paddingBottom:"max(env(safe-area-inset-bottom),24px)",
+          animation:"fadeUp .25s ease both",maxHeight:"85vh",display:"flex",flexDirection:"column"}}>
+
+        {/* Handle */}
+        <div style={{display:"flex",justifyContent:"center",padding:"12px 0 4px"}}>
+          <div style={{width:36,height:4,borderRadius:2,background:COL.line}}/>
+        </div>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 20px 12px",borderBottom:`1px solid ${COL.line}`}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:18,color:isToday?COL.accent:COL.ink}}>
+              {isToday?"Hoje":fmtShort(dateKey)}
+            </div>
+            <div style={{fontSize:12,color:COL.faint,marginTop:2}}>
+              {tasks.length} tarefa(s) · {events.length} evento(s) · {habits.length} hábito(s)
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button onClick={()=>setTab("tarefa")}
+              style={{background:tab==="tarefa"?COL.accentDim:COL.surface2,color:tab==="tarefa"?COL.accent:COL.mute,
+                border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>
+              + Tarefa
+            </button>
+            <button onClick={()=>setTab("evento")}
+              style={{background:tab==="evento"?COL.accentDim:COL.surface2,color:tab==="evento"?COL.accent:COL.mute,
+                border:"none",borderRadius:8,padding:"6px 12px",fontSize:12,fontWeight:600,fontFamily:"inherit",cursor:"pointer"}}>
+              + Evento
+            </button>
+          </div>
+        </div>
+
+        {/* Conteúdo */}
+        <div style={{flex:1,overflowY:"auto",padding:"12px 20px"}}>
+
+          {/* Form tarefa */}
+          {tab==="tarefa"&&(
+            <div style={{background:COL.surface2,borderRadius:12,padding:14,marginBottom:12}}>
+              <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()}
+                placeholder="Título da tarefa…" style={{...IS,marginBottom:10}} autoFocus/>
+              <AreaProjectSelect state={state} areaId={dArea} projectId={dProj} onArea={setDArea} onProject={setDProj}/>
+              <div style={{display:"flex",gap:6,marginBottom:10}}>
+                {Object.entries(PRIORITY).map(([k,v])=>(
+                  <button key={k} onClick={()=>setDPrio(k)}
+                    style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:11,fontWeight:600,fontFamily:"inherit",cursor:"pointer",
+                      border:`1px solid ${dPrio===k?(v.color||COL.accent):COL.line}`,
+                      background:dPrio===k?(v.bg||COL.accentDim):"transparent",
+                      color:dPrio===k?(v.color||COL.accent):COL.mute}}>
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={addTask} style={{...AB,flex:1,height:42,borderRadius:10}}>Adicionar</button>
+                <button onClick={()=>setTab("ver")} style={{...AB,flex:1,height:42,borderRadius:10,background:COL.surface,color:COL.mute}}>Cancelar</button>
+              </div>
+            </div>
+          )}
+
+          {/* Form evento */}
+          {tab==="evento"&&(
+            <div style={{background:COL.surface2,borderRadius:12,padding:14,marginBottom:12}}>
+              <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEvent()}
+                placeholder="Título do evento…" style={{...IS,marginBottom:10}} autoFocus/>
+              <input type="time" value={dTime} onChange={e=>setDTime(e.target.value)} style={{...IS,marginBottom:10}}/>
+              <AreaProjectSelect state={state} areaId={dArea} projectId={dProj} onArea={setDArea} onProject={setDProj}/>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={addEvent} style={{...AB,flex:1,height:42,borderRadius:10}}>Adicionar</button>
+                <button onClick={()=>setTab("ver")} style={{...AB,flex:1,height:42,borderRadius:10,background:COL.surface,color:COL.mute}}>Cancelar</button>
+              </div>
+            </div>
+          )}
+
+          {/* Eventos */}
+          {events.length>0&&(
+            <>
+              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6}}>Eventos</div>
+              {events.map(e=>(
+                <div key={e.id} style={{display:"flex",alignItems:"center",gap:10,background:COL.surface2,borderRadius:10,padding:"10px 12px",marginBottom:6}}>
+                  <div style={{fontSize:12,fontWeight:700,color:COL.warn,width:38}}>{e.time||"—"}</div>
+                  <div style={{flex:1,fontSize:13}}>{e.title}</div>
+                  {e.areaId&&<AreaDot color={areaOf(state,e.areaId)?.color} size={8}/>}
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Tarefas */}
+          {tasks.length>0&&(
+            <>
+              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:events.length?12:0}}>Tarefas</div>
+              {tasks.map(t=>(
+                <div key={t.id} onClick={()=>toggleTask(t.id)} style={{display:"flex",alignItems:"center",gap:10,background:COL.surface2,borderRadius:10,padding:"10px 12px",marginBottom:6,cursor:"pointer"}}>
+                  <Toggle on={t.done} color={areaOf(state,t.areaId)?.color}/>
+                  <div style={{flex:1,fontSize:13,color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                </div>
+              ))}
+            </>
+          )}
+
+          {/* Hábitos */}
+          {habits.length>0&&(
+            <>
+              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:tasks.length||events.length?12:0}}>Hábitos</div>
+              {habits.map(h=>{
+                const on=!!h.log[dateKey];
+                return (
+                  <div key={h.id} onClick={()=>toggleHabit(h.id)} style={{display:"flex",alignItems:"center",gap:10,background:COL.surface2,borderRadius:10,padding:"10px 12px",marginBottom:6,cursor:"pointer"}}>
+                    <Toggle on={on} color={areaOf(state,h.areaId)?.color}/>
+                    <div style={{flex:1,fontSize:13,color:on?COL.mute:COL.ink,textDecoration:on?"line-through":"none"}}>{h.title}</div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {tasks.length===0&&events.length===0&&habits.length===0&&tab==="ver"&&(
+            <div style={{textAlign:"center",padding:"24px 0",color:COL.faint,fontSize:13}}>
+              Dia vazio. Toque em "+ Tarefa" ou "+ Evento" pra adicionar.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -934,7 +1131,7 @@ function Habitos({ state, patch, onEdit }) {
 }
 
 // ─── ÁREAS ─────────────────────────────────────────────────────
-function Areas({ state, patch }) {
+function Areas({ state, patch, onProject }) {
   const [newArea,setNewArea]=useState(""); const [newColor,setNewColor]=useState(AREA_COLORS[0]);
   const [newProject,setNewProject]=useState({}); const [expanded,setExpanded]=useState({});
   const addArea=()=>{ const t=newArea.trim(); if(!t)return; patch(s=>s.areas.push({id:uid(),name:t,color:newColor,projects:[]})); setNewArea(""); setNewColor(AREA_COLORS[Math.floor(Math.random()*AREA_COLORS.length)]); };
@@ -957,7 +1154,7 @@ function Areas({ state, patch }) {
             {isExp&&(
               <div style={{borderTop:`1px solid ${COL.line}`,padding:"10px 14px 14px"}}>
                 <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Projetos</div>
-                {a.projects.map(p=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:`1px solid ${COL.line}`}}><FolderOpen size={13} color={a.color}/><div style={{flex:1,fontSize:13}}>{p.name}</div><div style={{fontSize:11,color:COL.faint}}>{countFor(a.id,p.id)} itens</div><button onClick={()=>delProject(a.id,p.id)} style={{background:"none",border:"none",color:COL.faint,padding:2,cursor:"pointer"}}><X size={13}/></button></div>))}
+                {a.projects.map(p=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:`1px solid ${COL.line}`,cursor:"pointer"}} onClick={()=>onProject({areaId:a.id,projectId:p.id})}><FolderOpen size={13} color={a.color}/><div style={{flex:1,fontSize:13,fontWeight:500}}>{p.name}</div><div style={{fontSize:11,color:COL.faint}}>{countFor(a.id,p.id)} tarefas</div><ChevronRight size={13} color={COL.faint}/></div>))}
                 <div style={{display:"flex",gap:8,marginTop:10}}><input value={newProject[a.id]||""} onChange={e=>setNewProject(p=>({...p,[a.id]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addProject(a.id)} placeholder="Novo projeto…" style={{...inputStyle,fontSize:13}}/><button onClick={()=>addProject(a.id)} style={{...addBtn,width:38,height:38,minWidth:38,borderRadius:8}}><Plus size={15}/></button></div>
               </div>
             )}
@@ -1531,10 +1728,195 @@ const inputStyle = { flex:1,background:COL.surface2,border:`1px solid ${COL.line
 const addBtn     = { background:COL.accent,color:COL.bg,border:"none",borderRadius:10,width:44,minWidth:44,height:44,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",cursor:"pointer",fontSize:14 };
 
 // ─── Nav ───────────────────────────────────────────────────────
-function Nav({ tabs, tab, setTab }) {
+function Nav({ mainTabs, moreTabs, tab, setTab }) {
+  const [showMore, setShowMore] = useState(false);
+  const isMore = moreTabs.some(t => t.id === tab);
+
   return (
-    <nav style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",background:`${COL.surface}F2`,backdropFilter:"blur(12px)",borderTop:`1px solid ${COL.line}`,paddingTop:8,paddingLeft:2,paddingRight:2,paddingBottom:"max(env(safe-area-inset-bottom), 14px)",zIndex:10}}>
-      {tabs.map(t=>{ const on=tab===t.id,I=t.icon; return (<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:on?COL.accent:COL.faint,fontFamily:"inherit",padding:"4px 0",cursor:"pointer"}}><I size={18} strokeWidth={on?2.4:1.8}/><span style={{fontSize:9,fontWeight:on?700:500}}>{t.label}</span></button>); })}
-    </nav>
+    <>
+      {/* Menu "..." overlay */}
+      {showMore && (
+        <div style={{position:"fixed",inset:0,zIndex:20}} onClick={()=>setShowMore(false)}>
+          <div style={{position:"absolute",bottom:"calc(env(safe-area-inset-bottom) + 72px)",left:"50%",transform:"translateX(-50%)",
+            width:"calc(100% - 32px)",maxWidth:448,background:COL.surface,
+            border:`1px solid ${COL.line}`,borderRadius:16,padding:8,
+            boxShadow:"0 -4px 24px rgba(0,0,0,.3)",animation:"fadeUp .2s ease"}}
+            onClick={e=>e.stopPropagation()}>
+            {moreTabs.map(t=>{
+              const on=tab===t.id, I=t.icon;
+              return (
+                <button key={t.id} onClick={()=>{setTab(t.id);setShowMore(false);}}
+                  style={{display:"flex",alignItems:"center",gap:14,width:"100%",
+                    background:on?COL.accentDim:"none",border:"none",borderRadius:10,
+                    padding:"12px 16px",color:on?COL.accent:COL.ink,
+                    fontFamily:"inherit",fontSize:15,fontWeight:on?700:400,cursor:"pointer"}}>
+                  <I size={20} strokeWidth={on?2.4:1.8}/>
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <nav style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",
+        width:"100%",maxWidth:480,display:"flex",background:`${COL.surface}F2`,
+        backdropFilter:"blur(12px)",borderTop:`1px solid ${COL.line}`,
+        paddingTop:8,paddingLeft:2,paddingRight:2,
+        paddingBottom:"max(env(safe-area-inset-bottom), 14px)",zIndex:10}}>
+        {mainTabs.map(t=>{
+          const on=tab===t.id, I=t.icon;
+          return (
+            <button key={t.id} onClick={()=>{setTab(t.id);setShowMore(false);}}
+              style={{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",
+                alignItems:"center",gap:3,color:on?COL.accent:COL.faint,
+                fontFamily:"inherit",padding:"4px 0",cursor:"pointer"}}>
+              <I size={18} strokeWidth={on?2.4:1.8}/>
+              <span style={{fontSize:9,fontWeight:on?700:500}}>{t.label}</span>
+            </button>
+          );
+        })}
+        {/* Botão "..." */}
+        <button onClick={()=>setShowMore(v=>!v)}
+          style={{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",
+            alignItems:"center",gap:3,color:isMore||showMore?COL.accent:COL.faint,
+            fontFamily:"inherit",padding:"4px 0",cursor:"pointer"}}>
+          <MoreHorizontal size={18} strokeWidth={isMore||showMore?2.4:1.8}/>
+          <span style={{fontSize:9,fontWeight:isMore||showMore?700:500}}>Mais</span>
+        </button>
+      </nav>
+    </>
+  );
+}
+
+// ─── TELA DE PROJETO ───────────────────────────────────────────
+function ProjetoView({ state, patch, areaId, projectId, onBack, cursor }) {
+  const [draft,   setDraft]   = useState("");
+  const [dPrio,   setDPrio]   = useState("normal");
+  const [open,    setOpen]    = useState(false);
+
+  const area    = areaOf(state, areaId);
+  const project = projectOf(state, areaId, projectId);
+  if (!area || !project) { onBack(); return null; }
+
+  const tasks = state.tasks.filter(t => t.projectId === projectId && t.areaId === areaId);
+  const total = tasks.length;
+  const done  = tasks.filter(t => t.done).length;
+  const pct   = total ? Math.round((done/total)*100) : 0;
+
+  const addTask = () => {
+    const t=draft.trim(); if(!t)return;
+    patch(s=>s.tasks.push({id:uid(),title:t,date:todayKey(),done:false,areaId,projectId,priority:dPrio}));
+    setDraft(""); setOpen(false); setDPrio("normal");
+  };
+  const toggleTask = id => patch(s=>{const x=s.tasks.find(t=>t.id===id);x.done=!x.done;});
+  const delTask    = id => patch(s=>{s.tasks=s.tasks.filter(t=>t.id!==id);});
+
+  const sortedTasks = [...tasks].sort((a,b)=>{
+    if(a.done!==b.done) return a.done?1:-1;
+    const po={alta:0,media:1,normal:2};
+    return (po[a.priority||"normal"])-(po[b.priority||"normal"]);
+  });
+
+  const IS = inputStyle;
+  const AB = addBtn;
+
+  return (
+    <>
+      {/* Header do projeto */}
+      <div style={{padding:"max(env(safe-area-inset-top),18px) 16px 12px",
+        background:`linear-gradient(${COL.bg},${COL.bg}E0)`,backdropFilter:"blur(8px)",
+        position:"sticky",top:0,zIndex:5}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <button onClick={onBack} style={{background:"none",border:"none",color:COL.mute,padding:4,cursor:"pointer"}}>
+            <ChevronLeft size={22}/>
+          </button>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <AreaDot color={area.color} size={10}/>
+              <div style={{fontSize:12,color:COL.mute}}>{area.name}</div>
+            </div>
+            <div style={{fontSize:20,fontWeight:800,letterSpacing:-0.5,marginTop:2}}>{project.name}</div>
+          </div>
+        </div>
+
+        {/* Barra de progresso */}
+        <div style={{marginTop:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+            <div style={{fontSize:12,color:COL.mute}}>{done} de {total} tarefas</div>
+            <div style={{fontSize:12,fontWeight:700,color:area.color}}>{pct}%</div>
+          </div>
+          <div style={{height:6,background:COL.surface2,borderRadius:3,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:area.color,borderRadius:3,transition:"width .4s ease"}}/>
+          </div>
+        </div>
+      </div>
+
+      {/* Lista de tarefas */}
+      <div style={{flex:1,overflowY:"auto",padding:"8px 16px 0",paddingBottom:"max(calc(env(safe-area-inset-bottom) + 40px), 60px)"}}>
+        {sortedTasks.length===0&&!open&&(
+          <div style={{textAlign:"center",padding:"40px 20px",color:COL.faint}}>
+            <div style={{fontSize:32,marginBottom:12}}>🎯</div>
+            <div style={{fontSize:15,fontWeight:600,marginBottom:6}}>Nenhuma tarefa ainda</div>
+            <div style={{fontSize:13}}>Adicione a primeira tarefa deste projeto</div>
+          </div>
+        )}
+
+        {sortedTasks.map(t=>(
+          <div key={t.id} className="row" style={{display:"flex",alignItems:"center",gap:10,
+            background:COL.surface,border:`1px solid ${t.done?COL.line:area.color+"40"}`,
+            borderRadius:12,padding:"12px 14px",marginBottom:8,cursor:"pointer"}}
+            onClick={()=>toggleTask(t.id)}>
+            <Toggle on={t.done} color={area.color}/>
+            <div style={{flex:1}}>
+              <div style={{color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none",fontSize:14}}>{t.title}</div>
+              {t.priority&&t.priority!=="normal"&&!t.done&&(
+                <div style={{fontSize:9.5,fontWeight:700,color:PRIORITY[t.priority].color,
+                  background:PRIORITY[t.priority].bg,padding:"2px 7px",borderRadius:20,
+                  display:"inline-block",marginTop:4}}>{PRIORITY[t.priority].label}</div>
+              )}
+            </div>
+            <button onClick={e=>{e.stopPropagation();delTask(t.id);}}
+              style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}>
+              <Trash2 size={14}/>
+            </button>
+          </div>
+        ))}
+
+        {/* Formulário de nova tarefa */}
+        {open ? (
+          <div style={{background:COL.surface,border:`1px solid ${area.color}`,borderRadius:12,padding:14,marginBottom:8}}>
+            <input value={draft} onChange={e=>setDraft(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&addTask()}
+              placeholder="Título da tarefa…" style={{...IS,marginBottom:10}} autoFocus/>
+            <div style={{fontSize:11.5,color:COL.faint,marginBottom:6}}>Prioridade</div>
+            <div style={{display:"flex",gap:6,marginBottom:12}}>
+              {Object.entries(PRIORITY).map(([k,v])=>(
+                <button key={k} onClick={()=>setDPrio(k)}
+                  style={{flex:1,padding:"7px 0",borderRadius:8,fontSize:11.5,fontWeight:600,
+                    fontFamily:"inherit",cursor:"pointer",
+                    border:`1px solid ${dPrio===k?(v.color||area.color):COL.line}`,
+                    background:dPrio===k?(v.bg||area.color+"22"):"transparent",
+                    color:dPrio===k?(v.color||area.color):COL.mute}}>
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={addTask} style={{...AB,flex:1,borderRadius:10,height:42,background:area.color}}>Adicionar</button>
+              <button onClick={()=>{setOpen(false);setDPrio("normal");}}
+                style={{...AB,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+            </div>
+          </div>
+        ) : (
+          <button onClick={()=>setOpen(true)}
+            style={{display:"flex",alignItems:"center",gap:8,width:"100%",background:"transparent",
+              border:`1.5px dashed ${area.color}60`,borderRadius:12,padding:"11px 14px",
+              color:area.color,fontSize:14,fontFamily:"inherit",cursor:"pointer",marginTop:4}}>
+            <Plus size={16}/> Nova tarefa no projeto
+          </button>
+        )}
+      </div>
+    </>
   );
 }
