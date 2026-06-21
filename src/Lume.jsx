@@ -141,6 +141,8 @@ export default function Lume() {
         select{appearance:none;-webkit-appearance:none;}
         input[type=range]{accent-color:${COL.accent};}
         ::-webkit-scrollbar{display:none;}
+        html{height:-webkit-fill-available;}
+        body{min-height:-webkit-fill-available;}
       `}</style>
 
       <Header tab={tab} cursor={cursor} setCursor={setCursor} theme={theme} toggleTheme={toggleTheme} profile={profile} onPerfil={()=>setTab("perfil")} />
@@ -324,7 +326,7 @@ function Header({ tab, cursor, setCursor, theme, toggleTheme, profile, onPerfil 
   const shift = n => { const [y,m,d]=cursor.split("-").map(Number); setCursor(todayKey(new Date(y,m-1,d+n))); };
   const isToday = cursor===todayKey();
   return (
-    <header style={{padding:"18px 16px 6px",position:"sticky",top:0,
+    <header style={{padding:"env(safe-area-inset-top, 18px) 16px 6px",paddingTop:"max(env(safe-area-inset-top), 18px)",position:"sticky",top:0,
       background:`linear-gradient(${COL.bg}, ${COL.bg}E0)`,backdropFilter:"blur(8px)",zIndex:5}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         {/* Avatar / Logo */}
@@ -1531,7 +1533,7 @@ const addBtn     = { background:COL.accent,color:COL.bg,border:"none",borderRadi
 // ─── Nav ───────────────────────────────────────────────────────
 function Nav({ tabs, tab, setTab }) {
   return (
-    <nav style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",background:`${COL.surface}F2`,backdropFilter:"blur(12px)",borderTop:`1px solid ${COL.line}`,padding:"8px 2px 14px",zIndex:10}}>
+    <nav style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,display:"flex",background:`${COL.surface}F2`,backdropFilter:"blur(12px)",borderTop:`1px solid ${COL.line}`,paddingTop:8,paddingLeft:2,paddingRight:2,paddingBottom:"max(env(safe-area-inset-bottom), 14px)",zIndex:10}}>
       {tabs.map(t=>{ const on=tab===t.id,I=t.icon; return (<button key={t.id} onClick={()=>setTab(t.id)} style={{flex:1,background:"none",border:"none",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:on?COL.accent:COL.faint,fontFamily:"inherit",padding:"4px 0",cursor:"pointer"}}><I size={18} strokeWidth={on?2.4:1.8}/><span style={{fontSize:9,fontWeight:on?700:500}}>{t.label}</span></button>); })}
     </nav>
   );
