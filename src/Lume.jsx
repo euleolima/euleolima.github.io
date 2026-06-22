@@ -79,6 +79,14 @@ const isTaskActive = (t, k) => {
   if (t.endDate   && k > t.endDate)   return false;
   return true;
 };
+
+const tasksForDate = (state, k) => state.tasks.filter(t =>
+  t.recurrent ? isTaskActive(t, k) : t.date === k
+);
+const datedTasksForDate = (state, k) => state.tasks.filter(t => !t.recurrent && t.date === k);
+const recurringTasksForDate = (state, k) => state.tasks.filter(t => t.recurrent && isTaskActive(t, k));
+const unscheduledTasks = state => state.tasks.filter(t => !t.recurrent && !t.date);
+const dateLabel = k => k ? k.split("-").reverse().join("/") : "Sem data";
 const RKEY = "lume:reclog";
 const loadRecLog = () => { const r=lsGet(RKEY); return r?JSON.parse(r):{}; };
 const saveRecLog = l => lsSet(RKEY, JSON.stringify(l));
@@ -147,6 +155,7 @@ export default function Lume() {
     setOnboarded(true);
   };
 
+  const [activeArea,    setActiveArea]    = useState(null); // areaId
   const [activeProject, setActiveProject] = useState(null); // {areaId, projectId}
 
   if (!state) return <Splash />;
@@ -165,7 +174,25 @@ export default function Lume() {
           areaId={activeProject.areaId}
           projectId={activeProject.projectId}
           onBack={()=>setActiveProject(null)}
-          onHome={()=>{ setActiveProject(null); setTab("hoje"); }}
+          onHome={()=>{ setActiveProject(null); setActiveArea(null); setTab("hoje"); }}
+        />
+      </div>
+    );
+  }
+
+  if (activeArea) {
+    return (
+      <div style={{ minHeight:"100vh",background:COL.bg,color:COL.ink,
+        fontFamily:"'Inter',system-ui,sans-serif",display:"flex",flexDirection:"column",
+        maxWidth:480,margin:"0 auto" }}>
+        <style>{`*{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}@keyframes slide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}.row{animation:slide .2s ease both;}input::placeholder,textarea::placeholder{color:${COL.faint}}select{appearance:none;-webkit-appearance:none;}input[type=range]{accent-color:${COL.accent};}::-webkit-scrollbar{display:none;}`}</style>
+        <AreaView
+          state={state} patch={patch}
+          notes={notes} patchNotes={patchNotes}
+          areaId={activeArea}
+          onBack={()=>setActiveArea(null)}
+          onProject={projectId=>setActiveProject({areaId:activeArea,projectId})}
+          onHome={()=>{ setActiveArea(null); setTab("hoje"); }}
         />
       </div>
     );
@@ -180,7 +207,6 @@ export default function Lume() {
     { id:"review",  label:"Review",  icon:TrendingUp },
   ];
   const moreTabs = [
-    { id:"agenda",  label:"Agenda",  icon:Calendar      },
     { id:"metas",   label:"Metas",   icon:Target        },
     { id:"notas",   label:"Notas",   icon:MessageSquare },
     { id:"perfil",  label:"Perfil",  icon:User          },
@@ -218,10 +244,10 @@ export default function Lume() {
           ? <FocoMode state={state} cursor={cursor} patch={patch} recLog={recLog} toggleRecLog={toggleRecLog} onExit={()=>setFocoMode(false)}/>
           : <>
             {tab==="hoje"    && <Hoje    state={state} cursor={cursor} patch={patch} onEdit={setEditTarget} recLog={recLog} toggleRecLog={toggleRecLog} tags={tags}/>}
-            {tab==="tempo"   && <Tempo   state={state} patch={patch}/>}
+            {tab==="tempo"   && <Tempo   state={state} patch={patch} recLog={recLog} toggleRecLog={toggleRecLog}/>}
             {tab==="agenda"  && <Agenda  state={state} patch={patch} onEdit={setEditTarget}/>}
             {tab==="habitos" && <Habitos state={state} patch={patch} onEdit={setEditTarget}/>}
-            {tab==="areas"   && <Areas   state={state} patch={patch} onProject={setActiveProject}/>}
+            {tab==="areas"   && <Areas   state={state} patch={patch} onArea={setActiveArea}/>}
             {tab==="metas"   && <Metas   state={state} patch={patch} onEdit={setEditTarget}/>}
             {tab==="notas"   && <Notas   state={state} notes={notes} patchNotes={patchNotes} tags={tags} setTags={setTags}/>}
             {tab==="review"  && <Review  state={state} checkins={checkins} onCheckin={()=>setShowCheckin(true)} recLog={recLog}/>}
@@ -475,13 +501,12 @@ function AreaProjectSelect({ state, areaId, projectId, onArea, onProject }) {
         <option value="">Área (opcional)</option>
         {state.areas.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
-      {area?.projects?.length>0 && (
-        <select value={projectId||""} onChange={e=>onProject(e.target.value)}
-          style={{...inputStyle,flex:2,paddingRight:12}}>
-          <option value="">Projeto</option>
-          {area.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-      )}
+      <select value={projectId||""} onChange={e=>onProject(e.target.value)}
+        disabled={!area || !area.projects?.length}
+        style={{...inputStyle,flex:2,paddingRight:12,opacity:area?.projects?.length?1:.55}}>
+        <option value="">{area ? "Projeto (opcional)" : "Escolha uma área"}</option>
+        {area?.projects?.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
     </div>
   );
 }
@@ -515,6 +540,8 @@ function EditModal({ target, state, patch, onClose, tags, setTags }) {
   // evento extra
   const [date,    setDate]    = useState(item.date||todayKey());
   const [time,    setTime]    = useState(item.time||"");
+  const [taskDate,setTaskDate]= useState(item.date||todayKey());
+  const [hasTaskDate,setHasTaskDate]=useState(type!=="task" || item.recurrent ? false : !!item.date);
 
   const addSub = () => {
     const t=subDraft.trim(); if(!t) return;
@@ -539,6 +566,8 @@ function EditModal({ target, state, patch, onClose, tags, setTags }) {
         t.tags=itemTags; t.subtasks=subs;
         if (t.recurrent) {
           t.days=days; t.startDate=start; t.endDate=hasEnd&&end?end:null;
+        } else {
+          t.date=hasTaskDate&&taskDate?taskDate:null;
         }
       } else if (type==="habit") {
         const h=s.habits.find(x=>x.id===id);
@@ -614,6 +643,25 @@ function EditModal({ target, state, patch, onClose, tags, setTags }) {
 
         {type==="task" && !isRecurrent && (
           <>
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11.5,color:COL.faint,marginBottom:6}}>Data</div>
+              {hasTaskDate ? (
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <input type="date" value={taskDate} onChange={e=>setTaskDate(e.target.value)}
+                    style={{...inputStyle,flex:1}}/>
+                  <button onClick={()=>setHasTaskDate(false)}
+                    style={{background:"none",border:"none",color:COL.faint,cursor:"pointer",padding:4}}>
+                    <X size={16}/>
+                  </button>
+                </div>
+              ) : (
+                <button onClick={()=>setHasTaskDate(true)}
+                  style={{...inputStyle,cursor:"pointer",color:COL.faint,textAlign:"left",display:"flex",alignItems:"center",gap:6}}>
+                  <Plus size={14}/> Definir data
+                </button>
+              )}
+            </div>
+
             <div style={{marginBottom:12}}>
               <div style={{fontSize:11.5,color:COL.faint,marginBottom:6}}>Prioridade</div>
               <div style={{display:"flex",gap:6}}>
@@ -810,18 +858,27 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
   const [dArea,    setDArea]    = useState("");
   const [dProject, setDProject] = useState("");
   const [dPrio,    setDPrio]    = useState("normal");
+  const [hasDate,  setHasDate]  = useState(true);
+  const [dDate,    setDDate]    = useState(cursor);
   const [open,     setOpen]     = useState(false);
-  const [recMode,  setRecMode]  = useState(false); // modo tarefa recorrente
+  const [eventOpen,setEventOpen]= useState(false);
+  const [eventDraft,setEventDraft]=useState("");
+  const [eventTime,setEventTime]=useState(()=>defaultTime());
+  const [eventArea,setEventArea]=useState("");
+  const [eventProject,setEventProject]=useState("");
+
+  useEffect(() => { if (!open) setDDate(cursor); }, [cursor, open]);
 
   const tk = todayKey();
   const events   = state.events.filter(e=>e.date===cursor).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
   // tarefas normais do dia
-  const tasks    = state.tasks.filter(t=>!t.recurrent && t.date===cursor);
+  const tasks    = datedTasksForDate(state, cursor);
   // tarefas recorrentes ativas hoje
-  const recTasks = state.tasks.filter(t=>t.recurrent && isTaskActive(t, cursor));
+  const recTasks = recurringTasksForDate(state, cursor);
+  const noDateTasks = cursor===tk ? unscheduledTasks(state).filter(t=>!t.done) : [];
   // atrasadas: tarefas normais não concluídas de dias anteriores
   const overdue  = cursor===tk
-    ? state.tasks.filter(t=>!t.recurrent && !t.done && t.date<tk).sort((a,b)=>b.date.localeCompare(a.date))
+    ? state.tasks.filter(t=>!t.recurrent && !t.done && t.date && t.date<tk).sort((a,b)=>b.date.localeCompare(a.date))
     : [];
   const habits   = state.habits.filter(h=>isHabitActive(h,cursor));
 
@@ -839,9 +896,14 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
 
   const addTask = () => {
     const t=draft.trim(); if(!t)return;
-    patch(s=>s.tasks.push({id:uid(),title:t,date:cursor,done:false,recurrent:false,
+    patch(s=>s.tasks.push({id:uid(),title:t,date:hasDate?(dDate||cursor):null,done:false,recurrent:false,
       areaId:dArea||null,projectId:dProject||null,priority:dPrio}));
-    setDraft(""); setOpen(false); setDPrio("normal");
+    setDraft(""); setOpen(false); setDPrio("normal"); setDArea(""); setDProject(""); setHasDate(true); setDDate(cursor);
+  };
+  const addEvent = () => {
+    const t=eventDraft.trim(); if(!t)return;
+    patch(s=>s.events.push({id:uid(),title:t,date:cursor,time:eventTime,areaId:eventArea||null,projectId:eventProject||null}));
+    setEventDraft(""); setEventTime(defaultTime()); setEventArea(""); setEventProject(""); setEventOpen(false);
   };
   const toggleTask  = id => patch(s=>{const x=s.tasks.find(t=>t.id===id);x.done=!x.done;});
   const delTask     = id => patch(s=>{s.tasks=s.tasks.filter(t=>t.id!==id);});
@@ -877,7 +939,7 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
         </Section>
       )}
 
-      {events.length>0 && (
+      {(events.length>0 || eventOpen) && (
         <Section label="Agenda">
           {events.map(e=>(
             <Item key={e.id} className="row">
@@ -887,6 +949,22 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
               <button onClick={()=>onEdit({type:"event",id:e.id})} style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Edit2 size={14}/></button>
             </Item>
           ))}
+          {eventOpen&&(
+            <div style={{background:COL.surface,border:`1px solid ${COL.line}`,borderRadius:12,padding:14,marginBottom:8}}>
+              <input value={eventDraft} onChange={e=>setEventDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addEvent()}
+                placeholder="Título do evento…" style={{...inputStyle,marginBottom:10}} autoFocus/>
+              <div style={{display:"flex",gap:8,marginBottom:10,alignItems:"center"}}>
+                <div style={{fontSize:12,color:COL.faint,flexShrink:0}}>Horário</div>
+                <input type="time" value={eventTime} onChange={e=>setEventTime(e.target.value)}
+                  style={{...inputStyle,flex:1,padding:"8px 12px"}}/>
+              </div>
+              <AreaProjectSelect state={state} areaId={eventArea} projectId={eventProject} onArea={setEventArea} onProject={setEventProject}/>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={addEvent} style={{...addBtn,flex:1,borderRadius:10,height:42}}>Adicionar</button>
+                <button onClick={()=>setEventOpen(false)} style={{...addBtn,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+              </div>
+            </div>
+          )}
         </Section>
       )}
 
@@ -921,6 +999,23 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
               </Item>
             );
           })}
+        </Section>
+      )}
+
+      {noDateTasks.length>0 && (
+        <Section label="Sem data">
+          {noDateTasks.map(t=>(
+            <Item key={t.id} className="row" clickable onClick={()=>toggleTask(t.id)}>
+              <Toggle on={t.done} color={areaOf(state,t.areaId)?.color||PRIORITY[t.priority||"normal"]?.color}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                <div style={{fontSize:10.5,color:COL.faint,marginTop:2}}>Sem data definida</div>
+              </div>
+              <AreaBadge state={state} areaId={t.areaId} projectId={t.projectId}/>
+              <button onClick={e=>{e.stopPropagation();onEdit({type:"task",id:t.id});}}
+                style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Edit2 size={14}/></button>
+            </Item>
+          ))}
         </Section>
       )}
 
@@ -960,9 +1055,25 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
 
         {open?(
           <div style={{background:COL.surface,border:`1px solid ${COL.line}`,borderRadius:12,padding:14,marginBottom:8}}>
-            <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!recMode&&addTask()}
+            <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()}
               placeholder="Título da tarefa…" style={{...inputStyle,marginBottom:10}} autoFocus/>
             <AreaProjectSelect state={state} areaId={dArea} projectId={dProject} onArea={setDArea} onProject={setDProject}/>
+            <div style={{fontSize:11.5,color:COL.faint,marginBottom:6}}>Data</div>
+            {hasDate ? (
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+                <input type="date" value={dDate} onChange={e=>setDDate(e.target.value)}
+                  style={{...inputStyle,flex:1}}/>
+                <button onClick={()=>setHasDate(false)}
+                  style={{background:"none",border:"none",color:COL.faint,cursor:"pointer",padding:4}}>
+                  <X size={16}/>
+                </button>
+              </div>
+            ) : (
+              <button onClick={()=>{setHasDate(true);setDDate(cursor);}}
+                style={{...inputStyle,cursor:"pointer",color:COL.faint,textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:12}}>
+                <Plus size={14}/> Definir data
+              </button>
+            )}
             <div style={{fontSize:11.5,color:COL.faint,marginBottom:6}}>Prioridade</div>
             <div style={{display:"flex",gap:6,marginBottom:12}}>
               {Object.entries(PRIORITY).map(([k,v])=>(
@@ -978,29 +1089,78 @@ function Hoje({ state, cursor, patch, onEdit, recLog, toggleRecLog }) {
             </div>
             <div style={{display:"flex",gap:8}}>
               <button onClick={addTask} style={{...addBtn,flex:1,borderRadius:10,height:42}}>Adicionar</button>
-              <button onClick={()=>{setOpen(false);setDPrio("normal");}} style={{...addBtn,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+              <button onClick={()=>{setOpen(false);setDPrio("normal");setHasDate(true);setDDate(cursor);}} style={{...addBtn,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
             </div>
           </div>
         ):(
           <div style={{display:"flex",gap:8}}>
-            <button onClick={()=>setOpen(true)}
+            <button onClick={()=>{setOpen(true);setEventOpen(false);}}
               style={{display:"flex",alignItems:"center",gap:8,flex:1,background:"transparent",
                 border:`1.5px dashed ${COL.line}`,borderRadius:12,padding:"11px 14px",
                 color:COL.faint,fontSize:14,fontFamily:"inherit",cursor:"pointer"}}>
               <Plus size={16}/> Nova tarefa
             </button>
+            <button onClick={()=>{setEventOpen(true);setOpen(false);}}
+              style={{display:"flex",alignItems:"center",gap:8,flex:1,background:"transparent",
+                border:`1.5px dashed ${COL.line}`,borderRadius:12,padding:"11px 14px",
+                color:COL.faint,fontSize:14,fontFamily:"inherit",cursor:"pointer"}}>
+              <Calendar size={16}/> Evento
+            </button>
           </div>
         )}
       </Section>
 
-      {total===0&&events.length===0&&overdue.length===0&&
+      <UpcomingDays state={state} cursor={cursor} recLog={recLog}/>
+
+      {total===0&&events.length===0&&overdue.length===0&&noDateTasks.length===0&&
         <Faint style={{marginTop:20}}>Dia livre. Acenda algo pra começar.</Faint>}
     </>
   );
 }
 
+function UpcomingDays({ state, cursor, recLog }) {
+  const days = useMemo(() => Array.from({length:6},(_,i)=>{
+    const d=keyToDate(cursor); d.setDate(d.getDate()+i+1);
+    const k=todayKey(d);
+    const events=state.events.filter(e=>e.date===k).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
+    const tasks=datedTasksForDate(state,k);
+    const recTasks=recurringTasksForDate(state,k);
+    const habits=state.habits.filter(h=>isHabitActive(h,k));
+    const total=tasks.length+recTasks.length+habits.length+events.length;
+    const done=tasks.filter(t=>t.done).length
+      +recTasks.filter(t=>recLog[`${t.id}_${k}`]).length
+      +habits.filter(h=>h.log[k]).length;
+    return {k,events,tasks,recTasks,habits,total,done};
+  }).filter(d=>d.total>0), [state, cursor, recLog]);
+
+  if (!days.length) return null;
+  return (
+    <Section label="Próximos dias">
+      {days.map(d=>(
+        <div key={d.k} className="row" style={{background:COL.surface,border:`1px solid ${COL.line}`,borderRadius:12,padding:"10px 12px",marginBottom:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",gap:10,marginBottom:7}}>
+            <div style={{fontSize:12,fontWeight:800,color:COL.mute,textTransform:"capitalize"}}>{fmtShort(d.k)}</div>
+            <div style={{fontSize:11,color:COL.faint}}>{d.done}/{d.tasks.length+d.recTasks.length+d.habits.length} feitos</div>
+          </div>
+          {[...d.events.slice(0,2).map(e=>({id:`e${e.id}`,label:e.title,sub:e.time||"Evento",color:COL.warn})),
+            ...d.tasks.slice(0,2).map(t=>({id:`t${t.id}`,label:t.title,sub:"Tarefa",color:areaOf(state,t.areaId)?.color||COL.accent})),
+            ...d.recTasks.slice(0,2).map(t=>({id:`r${t.id}`,label:t.title,sub:"Recorrente",color:areaOf(state,t.areaId)?.color||COL.accent})),
+            ...d.habits.slice(0,2).map(h=>({id:`h${h.id}`,label:h.title,sub:"Hábito",color:areaOf(state,h.areaId)?.color||COL.accent})),
+          ].slice(0,4).map(item=>(
+            <div key={item.id} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:COL.mute,marginTop:4}}>
+              <AreaDot color={item.color} size={6}/>
+              <span style={{flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.label}</span>
+              <span style={{fontSize:10.5,color:COL.faint}}>{item.sub}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </Section>
+  );
+}
+
 // ─── TEMPO ─────────────────────────────────────────────────────
-function Tempo({ state, patch }) {
+function Tempo({ state, patch, recLog, toggleRecLog }) {
   const [view,    setView]    = useState("mes");
   const [nav,     setNav]     = useState(0);
   const [daySheet,setDaySheet]= useState(null); // dateKey selecionado
@@ -1018,15 +1178,17 @@ function Tempo({ state, patch }) {
           </button>
         ))}
       </div>
-      {view==="semana"&&<ViewSemana state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
-      {view==="mes"   &&<ViewMes    state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
-      {view==="ano"   &&<ViewAno    state={state} nav={nav} setNav={setNav} onDay={setDaySheet}/>}
+      {view==="semana"&&<ViewSemana state={state} nav={nav} setNav={setNav} onDay={setDaySheet} recLog={recLog}/>}
+      {view==="mes"   &&<ViewMes    state={state} nav={nav} setNav={setNav} onDay={setDaySheet} recLog={recLog}/>}
+      {view==="ano"   &&<ViewAno    state={state} nav={nav} setNav={setNav} onDay={setDaySheet} recLog={recLog}/>}
 
       {daySheet&&(
         <DaySheet
           dateKey={daySheet}
           state={state}
           patch={patch}
+          recLog={recLog}
+          toggleRecLog={toggleRecLog}
           onClose={()=>setDaySheet(null)}
         />
       )}
@@ -1034,7 +1196,7 @@ function Tempo({ state, patch }) {
   );
 }
 
-function ViewSemana({ state, nav, setNav, onDay }) {
+function ViewSemana({ state, nav, setNav, onDay, recLog }) {
   const days=useMemo(()=>{
     const today=new Date(),dow=today.getDay();
     const mon=new Date(today); mon.setDate(today.getDate()-dow+1+nav*7);
@@ -1047,11 +1209,12 @@ function ViewSemana({ state, nav, setNav, onDay }) {
       <div style={{display:"flex",flexDirection:"column",gap:6}}>
         {days.map(k=>{
           const dt=keyToDate(k),dow2=dt.getDay();
-          const tasks=state.tasks.filter(t=>t.date===k);
+          const tasks=datedTasksForDate(state,k);
+          const recTasks=recurringTasksForDate(state,k);
           const habits=state.habits.filter(h=>isHabitActive(h,k));
           const events=state.events.filter(e=>e.date===k);
-          const total=tasks.length+habits.length;
-          const done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length;
+          const total=tasks.length+recTasks.length+habits.length;
+          const done=tasks.filter(t=>t.done).length+recTasks.filter(t=>recLog[`${t.id}_${k}`]).length+habits.filter(h=>h.log[k]).length;
           const pct=total?Math.round((done/total)*100):null;
           const isT=k===todayKey();
           return (
@@ -1064,7 +1227,8 @@ function ViewSemana({ state, nav, setNav, onDay }) {
               <div style={{flex:1}}>
                 {events.map(e=><div key={e.id} style={{fontSize:12,color:COL.warn,marginBottom:2}}>{e.time&&<span style={{marginRight:4}}>{e.time}</span>}{e.title}</div>)}
                 {tasks.slice(0,2).map(t=><div key={t.id} style={{fontSize:12,color:t.done?COL.faint:COL.mute,textDecoration:t.done?"line-through":"none",marginBottom:2}}>· {t.title}</div>)}
-                {tasks.length>2&&<div style={{fontSize:11,color:COL.faint}}>+{tasks.length-2} tarefas</div>}
+                {recTasks.slice(0,2).map(t=><div key={`r${t.id}`} style={{fontSize:12,color:recLog[`${t.id}_${k}`]?COL.faint:COL.mute,textDecoration:recLog[`${t.id}_${k}`]?"line-through":"none",marginBottom:2}}>↻ {t.title}</div>)}
+                {tasks.length+recTasks.length>2&&<div style={{fontSize:11,color:COL.faint}}>+{tasks.length+recTasks.length-2} tarefas</div>}
                 {habits.length>0&&<div style={{fontSize:11,color:COL.faint}}>{habits.length} hábito(s)</div>}
               </div>
               {pct!==null&&<MiniRing pct={pct} color={pct>=70?COL.accent:pct>=40?COL.warn:COL.done}/>}
@@ -1076,11 +1240,11 @@ function ViewSemana({ state, nav, setNav, onDay }) {
   );
 }
 
-function ViewMes({ state, nav, setNav, onDay }) {
+function ViewMes({ state, nav, setNav, onDay, recLog }) {
   const {year,month}=useMemo(()=>{ const d=new Date(); d.setDate(1); d.setMonth(d.getMonth()+nav); return {year:d.getFullYear(),month:d.getMonth()}; },[nav]);
   const days=useMemo(()=>{ const first=new Date(year,month,1),last=new Date(year,month+1,0),cells=[]; for(let i=0;i<first.getDay();i++) cells.push(null); for(let d=1;d<=last.getDate();d++) cells.push(todayKey(new Date(year,month,d))); while(cells.length%7!==0) cells.push(null); return cells; },[year,month]);
-  const dotMap=useMemo(()=>{ const m={}; state.tasks.forEach(t=>{if(!m[t.date])m[t.date]=[]; if(t.areaId)m[t.date].push(areaOf(state,t.areaId)?.color||COL.accent);}); state.events.forEach(e=>{if(!m[e.date])m[e.date]=[]; if(e.areaId)m[e.date].push(areaOf(state,e.areaId)?.color||COL.warn);}); return m; },[state]);
-  const compMap=useMemo(()=>{ const m={}; days.filter(Boolean).forEach(k=>{ const tasks=state.tasks.filter(t=>t.date===k); const habits=state.habits.filter(h=>isHabitActive(h,k)); const total=tasks.length+habits.length; const done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length; m[k]=total?Math.round((done/total)*100):null; }); return m; },[days,state]);
+  const dotMap=useMemo(()=>{ const m={}; days.filter(Boolean).forEach(k=>{ m[k]=[]; tasksForDate(state,k).forEach(t=>{ if(t.areaId)m[k].push(areaOf(state,t.areaId)?.color||COL.accent); }); state.events.filter(e=>e.date===k).forEach(e=>{if(e.areaId)m[k].push(areaOf(state,e.areaId)?.color||COL.warn);}); }); return m; },[days,state]);
+  const compMap=useMemo(()=>{ const m={}; days.filter(Boolean).forEach(k=>{ const tasks=datedTasksForDate(state,k); const recTasks=recurringTasksForDate(state,k); const habits=state.habits.filter(h=>isHabitActive(h,k)); const total=tasks.length+recTasks.length+habits.length; const done=tasks.filter(t=>t.done).length+recTasks.filter(t=>recLog[`${t.id}_${k}`]).length+habits.filter(h=>h.log[k]).length; m[k]=total?Math.round((done/total)*100):null; }); return m; },[days,state,recLog]);
   return (
     <>
       <NavRow label={monthName(year,month)} onPrev={()=>setNav(n=>n-1)} onNext={()=>setNav(n=>n+1)} onReset={()=>setNav(0)} isToday={nav===0}/>
@@ -1108,10 +1272,10 @@ function ViewMes({ state, nav, setNav, onDay }) {
   );
 }
 
-function ViewAno({ state, nav, setNav, onDay }) {
+function ViewAno({ state, nav, setNav, onDay, recLog }) {
   const year=useMemo(()=>new Date().getFullYear()+nav,[nav]);
   const MONTHS=useMemo(()=>Array.from({length:12},(_,m)=>{ const first=new Date(year,m,1),last=new Date(year,m+1,0),cells=[]; for(let i=0;i<first.getDay();i++) cells.push(null); for(let d=1;d<=last.getDate();d++) cells.push(todayKey(new Date(year,m,d))); return {m,name:new Date(year,m,1).toLocaleDateString("pt-BR",{month:"short"}),cells}; }),[year]);
-  const compMap=useMemo(()=>{ const m={}; for(let mo=0;mo<12;mo++){ const last=new Date(year,mo+1,0).getDate(); for(let d=1;d<=last;d++){ const k=todayKey(new Date(year,mo,d)); const tasks=state.tasks.filter(t=>t.date===k); const habits=state.habits.filter(h=>isHabitActive(h,k)); const total=tasks.length+habits.length; const done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length; m[k]=total?Math.round((done/total)*100):null; }} return m; },[year,state]);
+  const compMap=useMemo(()=>{ const m={}; for(let mo=0;mo<12;mo++){ const last=new Date(year,mo+1,0).getDate(); for(let d=1;d<=last;d++){ const k=todayKey(new Date(year,mo,d)); const tasks=datedTasksForDate(state,k); const recTasks=recurringTasksForDate(state,k); const habits=state.habits.filter(h=>isHabitActive(h,k)); const total=tasks.length+recTasks.length+habits.length; const done=tasks.filter(t=>t.done).length+recTasks.filter(t=>recLog[`${t.id}_${k}`]).length+habits.filter(h=>h.log[k]).length; m[k]=total?Math.round((done/total)*100):null; }} return m; },[year,state,recLog]);
   return (
     <>
       <NavRow label={String(year)} onPrev={()=>setNav(n=>n-1)} onNext={()=>setNav(n=>n+1)} onReset={()=>setNav(0)} isToday={nav===0}/>
@@ -1130,7 +1294,7 @@ function ViewAno({ state, nav, setNav, onDay }) {
 }
 
 // ─── DAY SHEET ─────────────────────────────────────────────────
-function DaySheet({ dateKey, state, patch, onClose }) {
+function DaySheet({ dateKey, state, patch, recLog, toggleRecLog, onClose }) {
   const [tab,     setTab]     = useState("ver");  // ver | tarefa | evento
   const [draft,   setDraft]   = useState("");
   const [dPrio,   setDPrio]   = useState("normal");
@@ -1139,7 +1303,8 @@ function DaySheet({ dateKey, state, patch, onClose }) {
   const [dTime,   setDTime]   = useState(()=>defaultTime());
 
   const dow     = keyToDate(dateKey).getDay();
-  const tasks   = state.tasks.filter(t=>t.date===dateKey);
+  const tasks   = datedTasksForDate(state,dateKey);
+  const recTasks= recurringTasksForDate(state,dateKey);
   const events  = state.events.filter(e=>e.date===dateKey).sort((a,b)=>(a.time||"99").localeCompare(b.time||"99"));
   const habits  = state.habits.filter(h=>isHabitActive(h,dateKey));
   const isToday = dateKey===todayKey();
@@ -1155,6 +1320,8 @@ function DaySheet({ dateKey, state, patch, onClose }) {
     setDraft(""); setTab("ver");
   };
   const toggleTask  = id => patch(s=>{const x=s.tasks.find(t=>t.id===id);x.done=!x.done;});
+  const delTask     = id => patch(s=>{s.tasks=s.tasks.filter(t=>t.id!==id);});
+  const delEvent    = id => patch(s=>{s.events=s.events.filter(e=>e.id!==id);});
   const toggleHabit = id => patch(s=>{const h=s.habits.find(x=>x.id===id);h.log[dateKey]=!h.log[dateKey];});
 
   const IS=inputStyle, AB=addBtn;
@@ -1180,7 +1347,7 @@ function DaySheet({ dateKey, state, patch, onClose }) {
               {isToday?"Hoje":fmtShort(dateKey)}
             </div>
             <div style={{fontSize:12,color:COL.faint,marginTop:2}}>
-              {tasks.length} tarefa(s) · {events.length} evento(s) · {habits.length} hábito(s)
+              {tasks.length+recTasks.length} tarefa(s) · {events.length} evento(s) · {habits.length} hábito(s)
             </div>
           </div>
           <div style={{display:"flex",gap:6}}>
@@ -1251,6 +1418,10 @@ function DaySheet({ dateKey, state, patch, onClose }) {
                   <div style={{fontSize:12,fontWeight:700,color:COL.warn,width:38}}>{e.time||"—"}</div>
                   <div style={{flex:1,fontSize:13}}>{e.title}</div>
                   {e.areaId&&<AreaDot color={areaOf(state,e.areaId)?.color} size={8}/>}
+                  <button onClick={()=>delEvent(e.id)}
+                    style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}>
+                    <Trash2 size={13}/>
+                  </button>
                 </div>
               ))}
             </>
@@ -1264,15 +1435,40 @@ function DaySheet({ dateKey, state, patch, onClose }) {
                 <div key={t.id} onClick={()=>toggleTask(t.id)} style={{display:"flex",alignItems:"center",gap:10,background:COL.surface2,borderRadius:10,padding:"10px 12px",marginBottom:6,cursor:"pointer"}}>
                   <Toggle on={t.done} color={areaOf(state,t.areaId)?.color}/>
                   <div style={{flex:1,fontSize:13,color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                  <button onClick={e=>{e.stopPropagation();delTask(t.id);}}
+                    style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}>
+                    <Trash2 size={13}/>
+                  </button>
                 </div>
               ))}
+            </>
+          )}
+
+          {/* Tarefas recorrentes */}
+          {recTasks.length>0&&(
+            <>
+              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:tasks.length||events.length?12:0}}>Tarefas recorrentes</div>
+              {recTasks.map(t=>{
+                const on=!!recLog[`${t.id}_${dateKey}`];
+                return (
+                  <div key={t.id} onClick={()=>toggleRecLog(t.id,dateKey)} style={{display:"flex",alignItems:"center",gap:10,background:COL.surface2,borderRadius:10,padding:"10px 12px",marginBottom:6,cursor:"pointer"}}>
+                    <Toggle on={on} color={areaOf(state,t.areaId)?.color||PRIORITY[t.priority||"normal"]?.color}/>
+                    <div style={{flex:1,fontSize:13,color:on?COL.mute:COL.ink,textDecoration:on?"line-through":"none"}}>{t.title}</div>
+                    <Repeat size={13} color={COL.faint}/>
+                    <button onClick={e=>{e.stopPropagation();delTask(t.id);}}
+                      style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}>
+                      <Trash2 size={13}/>
+                    </button>
+                  </div>
+                );
+              })}
             </>
           )}
 
           {/* Hábitos */}
           {habits.length>0&&(
             <>
-              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:tasks.length||events.length?12:0}}>Hábitos</div>
+              <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:6,marginTop:tasks.length||recTasks.length||events.length?12:0}}>Hábitos</div>
               {habits.map(h=>{
                 const on=!!h.log[dateKey];
                 return (
@@ -1285,7 +1481,7 @@ function DaySheet({ dateKey, state, patch, onClose }) {
             </>
           )}
 
-          {tasks.length===0&&events.length===0&&habits.length===0&&tab==="ver"&&(
+          {tasks.length===0&&recTasks.length===0&&events.length===0&&habits.length===0&&tab==="ver"&&(
             <div style={{textAlign:"center",padding:"24px 0",color:COL.faint,fontSize:13}}>
               Dia vazio. Toque em "+ Tarefa" ou "+ Evento" pra adicionar.
             </div>
@@ -1506,31 +1702,110 @@ function TarefasRecorrentes({ state, patch, onEdit }) {
 }
 
 // ─── ÁREAS ─────────────────────────────────────────────────────
-function Areas({ state, patch, onProject }) {
+function Areas({ state, patch, onArea }) {
   const [newArea,setNewArea]=useState(""); const [newColor,setNewColor]=useState(AREA_COLORS[0]);
   const [newProject,setNewProject]=useState({}); const [expanded,setExpanded]=useState({});
+  const [areaTask,setAreaTask]=useState({});
+  const [areaNote,setAreaNote]=useState({});
   const addArea=()=>{ const t=newArea.trim(); if(!t)return; patch(s=>s.areas.push({id:uid(),name:t,color:newColor,projects:[]})); setNewArea(""); setNewColor(AREA_COLORS[Math.floor(Math.random()*AREA_COLORS.length)]); };
   const delArea=id=>patch(s=>{ s.areas=s.areas.filter(a=>a.id!==id); ["tasks","habits","events","goals"].forEach(k=>s[k]=s[k].map(x=>x.areaId===id?{...x,areaId:null,projectId:null}:x)); });
   const addProject=aid=>{ const t=(newProject[aid]||"").trim(); if(!t)return; patch(s=>{const a=s.areas.find(a=>a.id===aid);a.projects.push({id:uid(),name:t});}); setNewProject(p=>({...p,[aid]:""})); };
-  const delProject=(aid,pid)=>patch(s=>{const a=s.areas.find(a=>a.id===aid);a.projects=a.projects.filter(p=>p.id!==pid);});
+  const delProject=(aid,pid)=>patch(s=>{const a=s.areas.find(a=>a.id===aid);a.projects=a.projects.filter(p=>p.id!==pid); ["tasks","habits","events","goals"].forEach(k=>s[k]=s[k].map(x=>x.areaId===aid&&x.projectId===pid?{...x,projectId:null}:x));});
   const toggle=id=>setExpanded(e=>({...e,[id]:!e[id]}));
   const countFor=(aid,pid=null)=>{ const t=state.tasks.filter(x=>x.areaId===aid&&(pid===null||x.projectId===pid)).length; const h=state.habits.filter(x=>x.areaId===aid&&(pid===null||x.projectId===pid)).length; return t+h; };
+  const taskDraft=(aid)=>areaTask[aid]||{title:"",projectId:"",priority:"normal",hasDate:false,date:todayKey()};
+  const setTaskDraft=(aid,patcher)=>setAreaTask(m=>({...m,[aid]:{...(m[aid]||{title:"",projectId:"",priority:"normal",hasDate:false,date:todayKey()}),...patcher}}));
+  const noteDraft=(aid)=>areaNote[aid]||{title:"",content:"",projectId:""};
+  const setNoteDraft=(aid,patcher)=>setAreaNote(m=>({...m,[aid]:{...(m[aid]||{title:"",content:"",projectId:""}),...patcher}}));
+  const addAreaTask=aid=>{
+    const d=taskDraft(aid); const t=d.title.trim(); if(!t)return;
+    patch(s=>s.tasks.push({id:uid(),title:t,date:d.hasDate?d.date:null,done:false,recurrent:false,areaId:aid,projectId:d.projectId||null,priority:d.priority}));
+    setAreaTask(m=>({...m,[aid]:{title:"",projectId:"",priority:"normal",hasDate:false,date:todayKey()}}));
+  };
+  const addAreaNote=aid=>{
+    const d=noteDraft(aid); const title=d.title.trim(), content=d.content.trim(); if(!title&&!content)return;
+    patchNotes(ns=>ns.push({id:uid(),title:title||"Sem título",content,areaId:aid,projectId:d.projectId||null,date:todayKey()}));
+    setAreaNote(m=>({...m,[aid]:{title:"",content:"",projectId:""}}));
+  };
   return (
     <>
       <Section label="Suas áreas">
         {state.areas.length===0&&<Faint>Crie sua primeira área.</Faint>}
         {state.areas.map(a=>{ const isExp=expanded[a.id]; return (
           <div key={a.id} className="row" style={{background:COL.surface,border:`1px solid ${COL.line}`,borderRadius:12,marginBottom:8,overflow:"hidden"}}>
-            <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer"}} onClick={()=>toggle(a.id)}>
+            <div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",cursor:"pointer"}} onClick={()=>onArea(a.id)}>
               <AreaDot color={a.color} size={12}/><div style={{flex:1}}><div style={{fontWeight:600}}>{a.name}</div><div style={{fontSize:11,color:COL.faint}}>{countFor(a.id)} itens · {a.projects.length} projeto(s)</div></div>
-              <ChevronRight size={16} style={{color:COL.faint,transform:isExp?"rotate(90deg)":"none",transition:"transform .2s"}}/>
+              <ChevronRight size={16} color={COL.faint}/>
               <button onClick={e=>{e.stopPropagation();delArea(a.id);}} style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Trash2 size={14}/></button>
             </div>
-            {isExp&&(
+            {false&&(
               <div style={{borderTop:`1px solid ${COL.line}`,padding:"10px 14px 14px"}}>
                 <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,marginBottom:8}}>Projetos</div>
                 {a.projects.map(p=>(<div key={p.id} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 0",borderBottom:`1px solid ${COL.line}`,cursor:"pointer"}} onClick={()=>onProject({areaId:a.id,projectId:p.id})}><FolderOpen size={13} color={a.color}/><div style={{flex:1,fontSize:13,fontWeight:500}}>{p.name}</div><div style={{fontSize:11,color:COL.faint}}>{countFor(a.id,p.id)} tarefas</div><ChevronRight size={13} color={COL.faint}/></div>))}
                 <div style={{display:"flex",gap:8,marginTop:10}}><input value={newProject[a.id]||""} onChange={e=>setNewProject(p=>({...p,[a.id]:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&addProject(a.id)} placeholder="Novo projeto…" style={{...inputStyle,fontSize:13}}/><button onClick={()=>addProject(a.id)} style={{...addBtn,width:38,height:38,minWidth:38,borderRadius:8}}><Plus size={15}/></button></div>
+
+                <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>Nova tarefa</div>
+                {(()=>{ const d=taskDraft(a.id); return (
+                  <div style={{background:COL.surface2,borderRadius:10,padding:10}}>
+                    <input value={d.title} onChange={e=>setTaskDraft(a.id,{title:e.target.value})}
+                      onKeyDown={e=>e.key==="Enter"&&addAreaTask(a.id)}
+                      placeholder="Título da tarefa…" style={{...inputStyle,marginBottom:8,fontSize:13}}/>
+                    <select value={d.projectId} onChange={e=>setTaskDraft(a.id,{projectId:e.target.value})}
+                      style={{...inputStyle,marginBottom:8,fontSize:13}} disabled={!a.projects.length}>
+                      <option value="">{a.projects.length?"Sem projeto":"Nenhum projeto nesta área"}</option>
+                      {a.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    {d.hasDate?(
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+                        <input type="date" value={d.date} onChange={e=>setTaskDraft(a.id,{date:e.target.value})}
+                          style={{...inputStyle,flex:1,fontSize:13}}/>
+                        <button onClick={()=>setTaskDraft(a.id,{hasDate:false})}
+                          style={{background:"none",border:"none",color:COL.faint,cursor:"pointer",padding:4}}>
+                          <X size={15}/>
+                        </button>
+                      </div>
+                    ):(
+                      <button onClick={()=>setTaskDraft(a.id,{hasDate:true,date:todayKey()})}
+                        style={{...inputStyle,cursor:"pointer",color:COL.faint,textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:8,fontSize:13}}>
+                        <Plus size={13}/> Definir data
+                      </button>
+                    )}
+                    <div style={{display:"flex",gap:6,marginBottom:8}}>
+                      {Object.entries(PRIORITY).map(([k,v])=>(
+                        <button key={k} onClick={()=>setTaskDraft(a.id,{priority:k})}
+                          style={{flex:1,padding:"6px 0",borderRadius:8,fontSize:11,fontWeight:600,fontFamily:"inherit",cursor:"pointer",
+                            border:`1px solid ${d.priority===k?(v.color||a.color):COL.line}`,
+                            background:d.priority===k?(v.bg||a.color+"22"):"transparent",
+                            color:d.priority===k?(v.color||a.color):COL.mute}}>
+                          {v.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button onClick={()=>addAreaTask(a.id)} style={{...addBtn,width:"100%",height:38,borderRadius:8,background:a.color}}>Criar tarefa</button>
+                  </div>
+                );})()}
+
+                <div style={{fontSize:11,fontWeight:700,color:COL.faint,textTransform:"uppercase",letterSpacing:1,margin:"16px 0 8px"}}>Notas</div>
+                {notes.filter(n=>n.areaId===a.id).slice(0,3).map(n=>(
+                  <div key={n.id} style={{background:COL.surface2,borderRadius:9,padding:"8px 10px",marginBottom:6}}>
+                    <div style={{fontSize:13,fontWeight:700}}>{n.title||"Sem título"}</div>
+                    {n.content&&<div style={{fontSize:11.5,color:COL.faint,marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.content}</div>}
+                  </div>
+                ))}
+                {(()=>{ const n=noteDraft(a.id); return (
+                  <div style={{background:COL.surface2,borderRadius:10,padding:10}}>
+                    <input value={n.title} onChange={e=>setNoteDraft(a.id,{title:e.target.value})}
+                      placeholder="Título da nota…" style={{...inputStyle,marginBottom:8,fontSize:13}}/>
+                    <textarea value={n.content} onChange={e=>setNoteDraft(a.id,{content:e.target.value})}
+                      placeholder="Conteúdo…" style={{...inputStyle,minHeight:70,resize:"vertical",marginBottom:8,fontSize:13,lineHeight:1.5}}/>
+                    <select value={n.projectId} onChange={e=>setNoteDraft(a.id,{projectId:e.target.value})}
+                      style={{...inputStyle,marginBottom:8,fontSize:13}} disabled={!a.projects.length}>
+                      <option value="">{a.projects.length?"Sem projeto":"Nenhum projeto nesta área"}</option>
+                      {a.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                    <button onClick={()=>addAreaNote(a.id)} style={{...addBtn,width:"100%",height:38,borderRadius:8,background:a.color}}>Criar nota</button>
+                  </div>
+                );})()}
               </div>
             )}
           </div>
@@ -1585,7 +1860,7 @@ function Review({ state, checkins, onCheckin, recLog }) {
   const thisWeek = weekKey();
   const hasCheckinThisWeek = checkins.some(c=>c.week===thisWeek);
 
-  const days7=useMemo(()=>{ const out=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const k=todayKey(d),dow=d.getDay(); const tasks=state.tasks.filter(t=>t.date===k&&(filter==="all"||t.areaId===filter)); const habits=state.habits.filter(h=>isHabitActive(h,k)&&(filter==="all"||h.areaId===filter)); const total=tasks.length+habits.length,done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length; out.push({k,label:WD[dow],pct:total?Math.round((done/total)*100):0,done,total}); } return out; },[state,filter]);
+  const days7=useMemo(()=>{ const out=[]; for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); const k=todayKey(d),dow=d.getDay(); const tasks=datedTasksForDate(state,k).filter(t=>filter==="all"||t.areaId===filter); const recTasks=recurringTasksForDate(state,k).filter(t=>filter==="all"||t.areaId===filter); const habits=state.habits.filter(h=>isHabitActive(h,k)&&(filter==="all"||h.areaId===filter)); const total=tasks.length+recTasks.length+habits.length,done=tasks.filter(t=>t.done).length+recTasks.filter(t=>recLog?.[`${t.id}_${k}`]).length+habits.filter(h=>h.log[k]).length; out.push({k,label:WD[dow],pct:total?Math.round((done/total)*100):0,done,total}); } return out; },[state,filter,recLog]);
   const avg=Math.round(days7.reduce((a,b)=>a+b.pct,0)/7);
 
   // streak de dias completos (≥70%)
@@ -1594,19 +1869,20 @@ function Review({ state, checkins, onCheckin, recLog }) {
     for(let i=0;i<60;i++){
       const d=new Date(); d.setDate(d.getDate()-i);
       const k=todayKey(d),dow=d.getDay();
-      const tasks=state.tasks.filter(t=>t.date===k);
+      const tasks=datedTasksForDate(state,k);
+      const recTasks=recurringTasksForDate(state,k);
       const habits=state.habits.filter(h=>isHabitActive(h,k));
-      const total=tasks.length+habits.length;
-      const done=tasks.filter(t=>t.done).length+habits.filter(h=>h.log[k]).length;
+      const total=tasks.length+recTasks.length+habits.length;
+      const done=tasks.filter(t=>t.done).length+recTasks.filter(t=>recLog?.[`${t.id}_${k}`]).length+habits.filter(h=>h.log[k]).length;
       const pct=total?Math.round((done/total)*100):0;
       if(total>0&&pct>=70) n++; else if(total>0) break;
     }
     return n;
-  },[state]);
+  },[state,recLog]);
 
   const bestHabit=useMemo(()=>[...state.habits].filter(h=>filter==="all"||h.areaId===filter).map(h=>({title:h.title,hits:Object.values(h.log).filter(Boolean).length,area:areaOf(state,h.areaId)})).sort((a,b)=>b.hits-a.hits)[0],[state,filter]);
 
-  const overdueCount = state.tasks.filter(t=>!t.done&&t.date<tk).length;
+  const overdueCount = state.tasks.filter(t=>!t.recurrent&&!t.done&&t.date&&t.date<tk).length;
 
   return (
     <>
@@ -2561,11 +2837,283 @@ function Nav({ mainTabs, moreTabs, tab, setTab }) {
   );
 }
 
+// ─── TELA DE ÁREA ──────────────────────────────────────────────
+function AreaView({ state, patch, notes, patchNotes, areaId, onBack, onProject, onHome }) {
+  const [activeTab, setActiveTab] = useState("projetos"); // projetos | tarefas | notas
+  const [projectDraft, setProjectDraft] = useState("");
+  const [showProjectForm, setShowProjectForm] = useState(false);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskProject, setTaskProject] = useState("");
+  const [taskPrio, setTaskPrio] = useState("normal");
+  const [hasDate, setHasDate] = useState(false);
+  const [taskDate, setTaskDate] = useState(todayKey());
+  const [showTaskForm, setShowTaskForm] = useState(false);
+  const [noteTitle, setNoteTitle] = useState("");
+  const [noteContent, setNoteContent] = useState("");
+  const [noteProject, setNoteProject] = useState("");
+  const [showNoteForm, setShowNoteForm] = useState(false);
+  const [editNote, setEditNote] = useState(null);
+
+  const area = areaOf(state, areaId);
+  if (!area) { onBack(); return null; }
+
+  const areaTasks = state.tasks.filter(t=>t.areaId===areaId);
+  const areaNotes = notes.filter(n=>n.areaId===areaId);
+  const done = areaTasks.filter(t=>t.done).length;
+  const pct = areaTasks.length ? Math.round((done/areaTasks.length)*100) : 0;
+
+  const addProject = () => {
+    const t=projectDraft.trim(); if(!t) return;
+    patch(s=>{const a=s.areas.find(a=>a.id===areaId); a.projects.push({id:uid(),name:t});});
+    setProjectDraft(""); setShowProjectForm(false);
+  };
+  const delProject = pid => patch(s=>{
+    const a=s.areas.find(a=>a.id===areaId);
+    a.projects=a.projects.filter(p=>p.id!==pid);
+    ["tasks","habits","events","goals"].forEach(k=>s[k]=s[k].map(x=>x.areaId===areaId&&x.projectId===pid?{...x,projectId:null}:x));
+  });
+  const addTask = () => {
+    const t=taskTitle.trim(); if(!t) return;
+    patch(s=>s.tasks.push({id:uid(),title:t,date:hasDate?taskDate:null,done:false,recurrent:false,areaId,projectId:taskProject||null,priority:taskPrio}));
+    setTaskTitle(""); setTaskProject(""); setTaskPrio("normal"); setHasDate(false); setTaskDate(todayKey()); setShowTaskForm(false);
+  };
+  const toggleTask = id => patch(s=>{const t=s.tasks.find(x=>x.id===id); if(t)t.done=!t.done;});
+  const delTask = id => patch(s=>{s.tasks=s.tasks.filter(t=>t.id!==id);});
+  const addNote = () => {
+    const title=noteTitle.trim(), content=noteContent.trim(); if(!title&&!content) return;
+    patchNotes(ns=>ns.push({id:uid(),title:title||"Sem título",content,areaId,projectId:noteProject||null,date:todayKey()}));
+    setNoteTitle(""); setNoteContent(""); setNoteProject(""); setShowNoteForm(false);
+  };
+
+  if (editNote) {
+    const existingNote = notes.find(n=>n.id===editNote);
+    return (
+      <NoteEditor
+        note={existingNote}
+        areaId={areaId}
+        projectId={existingNote?.projectId}
+        area={area}
+        onSave={n=>{ patchNotes(ns=>{const i=ns.findIndex(x=>x.id===editNote); if(i>=0) ns[i]={...ns[i],...n};}); setEditNote(null); }}
+        onDelete={()=>{ patchNotes(ns=>ns.filter(x=>x.id!==editNote)); setEditNote(null); }}
+        onBack={()=>setEditNote(null)}
+      />
+    );
+  }
+
+  const tabs = [
+    {id:"projetos",label:`Projetos (${area.projects.length})`},
+    {id:"tarefas",label:`Tarefas (${areaTasks.length})`},
+    {id:"notas",label:`Notas (${areaNotes.length})`},
+  ];
+
+  return (
+    <>
+      <div style={{padding:"max(env(safe-area-inset-top),18px) 16px 0",
+        background:`linear-gradient(${COL.bg},${COL.bg}E0)`,backdropFilter:"blur(8px)",
+        position:"sticky",top:0,zIndex:5}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+          <button onClick={onBack} style={{background:"none",border:"none",color:COL.mute,padding:4,cursor:"pointer"}}>
+            <ChevronLeft size={22}/>
+          </button>
+          <div style={{flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <AreaDot color={area.color} size={9}/>
+              <div style={{fontSize:12,color:COL.mute}}>Área</div>
+            </div>
+            <div style={{fontSize:22,fontWeight:800,letterSpacing:-0.5,marginTop:1}}>{area.name}</div>
+          </div>
+          <button onClick={onHome}
+            style={{background:COL.surface2,border:`1px solid ${COL.line}`,color:COL.mute,
+              borderRadius:10,padding:"6px 12px",fontSize:12,fontFamily:"inherit",cursor:"pointer",
+              display:"flex",alignItems:"center",gap:5}}>
+            <Sun size={13}/> Hoje
+          </button>
+        </div>
+
+        <div style={{marginBottom:12}}>
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+            <div style={{fontSize:11.5,color:COL.mute}}>{done} de {areaTasks.length} tarefas</div>
+            <div style={{fontSize:11.5,fontWeight:700,color:area.color}}>{pct}%</div>
+          </div>
+          <div style={{height:5,background:COL.surface2,borderRadius:3,overflow:"hidden"}}>
+            <div style={{height:"100%",width:`${pct}%`,background:area.color,borderRadius:3,transition:"width .4s ease"}}/>
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:6,paddingBottom:12}}>
+          {tabs.map(t=>(
+            <button key={t.id} onClick={()=>setActiveTab(t.id)}
+              style={{flex:1,padding:"8px 0",borderRadius:10,fontSize:12.5,fontWeight:600,
+                fontFamily:"inherit",border:"none",cursor:"pointer",
+                background:activeTab===t.id?area.color+"22":"transparent",
+                color:activeTab===t.id?area.color:COL.mute}}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"8px 16px 0",paddingBottom:"max(calc(env(safe-area-inset-bottom)+40px),60px)"}}>
+        {activeTab==="projetos"&&(
+          <>
+            <Section label="Projetos">
+              {area.projects.length===0&&<Faint>Nenhum projeto nesta área.</Faint>}
+              {area.projects.map(p=>(
+                <Item key={p.id} className="row" clickable onClick={()=>onProject(p.id)}>
+                  <FolderOpen size={15} color={area.color}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontWeight:600,fontSize:14}}>{p.name}</div>
+                    <div style={{fontSize:11,color:COL.faint,marginTop:2}}>{state.tasks.filter(t=>t.areaId===areaId&&t.projectId===p.id).length} tarefa(s)</div>
+                  </div>
+                  <ChevronRight size={14} color={COL.faint}/>
+                  <button onClick={e=>{e.stopPropagation();delProject(p.id);}} style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Trash2 size={14}/></button>
+                </Item>
+              ))}
+            </Section>
+            {showProjectForm ? (
+              <Section label="Novo projeto">
+                <input value={projectDraft} onChange={e=>setProjectDraft(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addProject()}
+                  placeholder="Nome do projeto…" style={{...inputStyle,marginBottom:10}} autoFocus/>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={addProject} style={{...addBtn,flex:1,height:42,borderRadius:10,background:area.color}}>Criar projeto</button>
+                  <button onClick={()=>{setShowProjectForm(false);setProjectDraft("");}}
+                    style={{...addBtn,flex:1,height:42,borderRadius:10,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+                </div>
+              </Section>
+            ) : (
+              <button onClick={()=>setShowProjectForm(true)}
+                style={{display:"flex",alignItems:"center",gap:8,width:"100%",
+                  background:"transparent",border:`1.5px dashed ${area.color}60`,borderRadius:12,
+                  padding:"11px 14px",color:area.color,fontSize:14,fontFamily:"inherit",cursor:"pointer",marginTop:12}}>
+                <Plus size={16}/> Novo projeto
+              </button>
+            )}
+          </>
+        )}
+
+        {activeTab==="tarefas"&&(
+          <>
+            <Section label="Tarefas da área">
+              {areaTasks.length===0&&<Faint>Nenhuma tarefa nesta área.</Faint>}
+              {[...areaTasks].sort((a,b)=>(a.done===b.done?0:a.done?1:-1)).map(t=>(
+                <Item key={t.id} className="row" clickable onClick={()=>toggleTask(t.id)}>
+                  <Toggle on={t.done} color={area.color}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:14,color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                    <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:4}}>
+                      <span style={{fontSize:9.5,color:COL.faint,background:COL.surface2,padding:"2px 7px",borderRadius:20}}>{dateLabel(t.date)}</span>
+                      {projectOf(state,areaId,t.projectId)&&<span style={{fontSize:9.5,color:area.color,background:area.color+"22",padding:"2px 7px",borderRadius:20}}>{projectOf(state,areaId,t.projectId).name}</span>}
+                    </div>
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();delTask(t.id);}} style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Trash2 size={14}/></button>
+                </Item>
+              ))}
+            </Section>
+            {showTaskForm ? (
+              <Section label="Nova tarefa">
+                <input value={taskTitle} onChange={e=>setTaskTitle(e.target.value)}
+                  onKeyDown={e=>e.key==="Enter"&&addTask()}
+                  placeholder="Título da tarefa…" style={{...inputStyle,marginBottom:10}} autoFocus/>
+                <select value={taskProject} onChange={e=>setTaskProject(e.target.value)}
+                  disabled={!area.projects.length}
+                  style={{...inputStyle,marginBottom:10,opacity:area.projects.length?1:.55}}>
+                  <option value="">{area.projects.length?"Projeto (opcional)":"Nenhum projeto nesta área"}</option>
+                  {area.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                {hasDate?(
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:10}}>
+                    <input type="date" value={taskDate} onChange={e=>setTaskDate(e.target.value)} style={{...inputStyle,flex:1}}/>
+                    <button onClick={()=>setHasDate(false)} style={{background:"none",border:"none",color:COL.faint,cursor:"pointer",padding:4}}><X size={16}/></button>
+                  </div>
+                ):(
+                  <button onClick={()=>setHasDate(true)}
+                    style={{...inputStyle,cursor:"pointer",color:COL.faint,textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:10}}>
+                    <Plus size={14}/> Definir data
+                  </button>
+                )}
+                <div style={{display:"flex",gap:6,marginBottom:12}}>
+                  {Object.entries(PRIORITY).map(([k,v])=>(
+                    <button key={k} onClick={()=>setTaskPrio(k)} style={{flex:1,padding:"7px 0",borderRadius:8,fontSize:11.5,
+                      fontWeight:600,fontFamily:"inherit",cursor:"pointer",
+                      border:`1px solid ${taskPrio===k?(v.color||area.color):COL.line}`,
+                      background:taskPrio===k?(v.bg||area.color+"22"):"transparent",
+                      color:taskPrio===k?(v.color||area.color):COL.mute}}>{v.label}</button>
+                  ))}
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={addTask} style={{...addBtn,flex:1,height:42,borderRadius:10,background:area.color}}>Criar tarefa</button>
+                  <button onClick={()=>{setShowTaskForm(false);setTaskTitle("");setTaskProject("");setTaskPrio("normal");setHasDate(false);setTaskDate(todayKey());}}
+                    style={{...addBtn,flex:1,height:42,borderRadius:10,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+                </div>
+              </Section>
+            ) : (
+              <button onClick={()=>setShowTaskForm(true)}
+                style={{display:"flex",alignItems:"center",gap:8,width:"100%",
+                  background:"transparent",border:`1.5px dashed ${area.color}60`,borderRadius:12,
+                  padding:"11px 14px",color:area.color,fontSize:14,fontFamily:"inherit",cursor:"pointer",marginTop:12}}>
+                <Plus size={16}/> Nova tarefa
+              </button>
+            )}
+          </>
+        )}
+
+        {activeTab==="notas"&&(
+          <>
+            <Section label="Notas da área">
+              {areaNotes.length===0&&<Faint>Nenhuma nota nesta área.</Faint>}
+              {areaNotes.map(n=>(
+                <div key={n.id} className="row" onClick={()=>setEditNote(n.id)}
+                  style={{background:COL.surface,border:`1px solid ${COL.line}`,borderRadius:12,padding:14,marginBottom:8,cursor:"pointer"}}>
+                  <div style={{display:"flex",justifyContent:"space-between",gap:8,marginBottom:6}}>
+                    <div style={{fontWeight:700,fontSize:14}}>{n.title||"Sem título"}</div>
+                    <div style={{fontSize:10.5,color:COL.faint}}>{dateLabel(n.date)}</div>
+                  </div>
+                  {projectOf(state,areaId,n.projectId)&&<div style={{fontSize:10.5,color:area.color,marginBottom:5}}>{projectOf(state,areaId,n.projectId).name}</div>}
+                  {n.content&&<div style={{fontSize:12.5,color:COL.mute,lineHeight:1.5,WebkitLineClamp:2,display:"-webkit-box",WebkitBoxOrient:"vertical",overflow:"hidden"}}>{n.content}</div>}
+                </div>
+              ))}
+            </Section>
+            {showNoteForm ? (
+              <Section label="Nova nota">
+                <input value={noteTitle} onChange={e=>setNoteTitle(e.target.value)}
+                  placeholder="Título da nota…" style={{...inputStyle,marginBottom:10}} autoFocus/>
+                <textarea value={noteContent} onChange={e=>setNoteContent(e.target.value)}
+                  placeholder="Conteúdo…" style={{...inputStyle,minHeight:100,resize:"vertical",marginBottom:10,lineHeight:1.5}}/>
+                <select value={noteProject} onChange={e=>setNoteProject(e.target.value)}
+                  disabled={!area.projects.length}
+                  style={{...inputStyle,marginBottom:10,opacity:area.projects.length?1:.55}}>
+                  <option value="">{area.projects.length?"Projeto (opcional)":"Nenhum projeto nesta área"}</option>
+                  {area.projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={addNote} style={{...addBtn,flex:1,height:42,borderRadius:10,background:area.color}}>Criar nota</button>
+                  <button onClick={()=>{setShowNoteForm(false);setNoteTitle("");setNoteContent("");setNoteProject("");}}
+                    style={{...addBtn,flex:1,height:42,borderRadius:10,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+                </div>
+              </Section>
+            ) : (
+              <button onClick={()=>setShowNoteForm(true)}
+                style={{display:"flex",alignItems:"center",gap:8,width:"100%",
+                  background:"transparent",border:`1.5px dashed ${area.color}60`,borderRadius:12,
+                  padding:"11px 14px",color:area.color,fontSize:14,fontFamily:"inherit",cursor:"pointer",marginTop:12}}>
+                <Plus size={16}/> Nova nota
+              </button>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ─── TELA DE PROJETO ───────────────────────────────────────────
 function ProjetoView({ state, patch, notes, patchNotes, areaId, projectId, onBack, onHome }) {
   const [activeTab, setActiveTab] = useState("tarefas"); // tarefas | notas
   const [draft,     setDraft]     = useState("");
   const [dPrio,     setDPrio]     = useState("normal");
+  const [hasDate,   setHasDate]   = useState(false);
+  const [dDate,     setDDate]     = useState(todayKey());
   const [openTask,  setOpenTask]  = useState(false);
   const [editNote,  setEditNote]  = useState(null); // null | {id} | "new"
 
@@ -2581,8 +3129,8 @@ function ProjetoView({ state, patch, notes, patchNotes, areaId, projectId, onBac
 
   const addTask = () => {
     const t=draft.trim(); if(!t) return;
-    patch(s=>s.tasks.push({id:uid(),title:t,date:todayKey(),done:false,areaId,projectId,priority:dPrio}));
-    setDraft(""); setOpenTask(false); setDPrio("normal");
+    patch(s=>s.tasks.push({id:uid(),title:t,date:hasDate?dDate:null,done:false,recurrent:false,areaId,projectId,priority:dPrio}));
+    setDraft(""); setOpenTask(false); setDPrio("normal"); setHasDate(false); setDDate(todayKey());
   };
   const toggleTask = id => patch(s=>{const x=s.tasks.find(t=>t.id===id);x.done=!x.done;});
   const delTask    = id => patch(s=>{s.tasks=s.tasks.filter(t=>t.id!==id);});
@@ -2683,11 +3231,13 @@ function ProjetoView({ state, patch, notes, patchNotes, areaId, projectId, onBac
                 <Toggle on={t.done} color={area.color}/>
                 <div style={{flex:1}}>
                   <div style={{color:t.done?COL.mute:COL.ink,textDecoration:t.done?"line-through":"none",fontSize:14}}>{t.title}</div>
-                  {t.priority&&t.priority!=="normal"&&!t.done&&(
-                    <div style={{fontSize:9.5,fontWeight:700,color:PRIORITY[t.priority].color,
-                      background:PRIORITY[t.priority].bg,padding:"2px 7px",borderRadius:20,
-                      display:"inline-block",marginTop:4}}>{PRIORITY[t.priority].label}</div>
-                  )}
+                  <div style={{display:"flex",gap:5,flexWrap:"wrap",marginTop:4}}>
+                    <span style={{fontSize:9.5,color:COL.faint,background:COL.surface2,padding:"2px 7px",borderRadius:20}}>{dateLabel(t.date)}</span>
+                    {t.priority&&t.priority!=="normal"&&!t.done&&(
+                      <span style={{fontSize:9.5,fontWeight:700,color:PRIORITY[t.priority].color,
+                        background:PRIORITY[t.priority].bg,padding:"2px 7px",borderRadius:20}}>{PRIORITY[t.priority].label}</span>
+                    )}
+                  </div>
                 </div>
                 <button onClick={e=>{e.stopPropagation();delTask(t.id);}} style={{background:"none",border:"none",color:COL.faint,padding:4,cursor:"pointer"}}><Trash2 size={14}/></button>
               </div>
@@ -2696,6 +3246,21 @@ function ProjetoView({ state, patch, notes, patchNotes, areaId, projectId, onBac
               <div style={{background:COL.surface,border:`1px solid ${area.color}`,borderRadius:12,padding:14,marginBottom:8}}>
                 <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addTask()}
                   placeholder="Título da tarefa…" style={{...IS,marginBottom:10}} autoFocus/>
+                {hasDate?(
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+                    <input type="date" value={dDate} onChange={e=>setDDate(e.target.value)}
+                      style={{...IS,flex:1}}/>
+                    <button onClick={()=>setHasDate(false)}
+                      style={{background:"none",border:"none",color:COL.faint,cursor:"pointer",padding:4}}>
+                      <X size={16}/>
+                    </button>
+                  </div>
+                ):(
+                  <button onClick={()=>setHasDate(true)}
+                    style={{...IS,cursor:"pointer",color:COL.faint,textAlign:"left",display:"flex",alignItems:"center",gap:6,marginBottom:12}}>
+                    <Plus size={14}/> Definir data
+                  </button>
+                )}
                 <div style={{display:"flex",gap:6,marginBottom:12}}>
                   {Object.entries(PRIORITY).map(([k,v])=>(
                     <button key={k} onClick={()=>setDPrio(k)} style={{flex:1,padding:"7px 0",borderRadius:8,fontSize:11.5,
@@ -2707,7 +3272,7 @@ function ProjetoView({ state, patch, notes, patchNotes, areaId, projectId, onBac
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={addTask} style={{...AB,flex:1,borderRadius:10,height:42,background:area.color}}>Adicionar</button>
-                  <button onClick={()=>{setOpenTask(false);setDPrio("normal");}} style={{...AB,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
+                  <button onClick={()=>{setOpenTask(false);setDPrio("normal");setHasDate(false);setDDate(todayKey());}} style={{...AB,flex:1,borderRadius:10,height:42,background:COL.surface2,color:COL.mute}}>Cancelar</button>
                 </div>
               </div>
             ) : (
